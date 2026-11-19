@@ -5,6 +5,8 @@ import SwiftUI
 struct AccountSummaryView: View {
     let entry: AccountEntry
     var compact = false
+    @AppStorage(Pref.Key.relativeResets) private var relativeResets = true
+    @AppStorage(Pref.Key.showPace) private var showPace = true
 
     private var textFont: Font { compact ? .system(size: 12) : .callout }
 
@@ -72,18 +74,7 @@ struct AccountSummaryView: View {
                 }
                 if entry.account.provider == .codex {
                     Divider()
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack {
-                            Text("Available resets").font(textFont.weight(.medium))
-                            Spacer(minLength: 4)
-                            Text(snapshot.resetCredits.map { "\($0.availableCount)" } ?? "Unavailable")
-                                .font(textFont.monospacedDigit())
-                        }
-                        if !compact, let expiry = snapshot.resetCredits?.expirations.first {
-                            Text("Next expiry \(expiry.usageResetText())")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
+                    resetCreditsRow(snapshot, now: now)
                 }
                 if let left = creditLeft, let cap = creditCap {
                     Divider()
@@ -134,7 +125,12 @@ struct AccountSummaryView: View {
                         quotaValue(metric)
                     }
                 }
-                quotaBar(metric)
+                let pace = showPace ? QuotaPace(metric, now: Date()) : nil
+                quotaBar(metric, pace: pace)
+                if let pace {
+                    Text(pace.summary(now: Date())).font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if let reset = metric.resetsAt { resetLabel(reset) }
                 else { Text("Reset unavailable").font(.caption).foregroundStyle(.secondary) }
             }
@@ -162,22 +158,54 @@ struct AccountSummaryView: View {
             .font(textFont.monospacedDigit()).foregroundStyle(metric.remainingColor)
     }
 
-    @ViewBuilder private func quotaBar(_ metric: UsageMetric) -> some View {
+    @ViewBuilder private func quotaBar(_ metric: UsageMetric, pace: QuotaPace? = nil) -> some View {
         if let remaining = metric.value, remaining.isFinite, (0...100).contains(remaining) {
             GeometryReader { geometry in
+                let width = geometry.size.width
                 ZStack(alignment: .leading) {
-                    Capsule().fill(.primary.opacity(0.1))
-                    Capsule().fill(metric.remainingColor).frame(width: geometry.size.width * remaining / 100)
-                }
-            }.frame(height: 6)
+                    Capsule().fill(.primary.opacity(0.1)).frame(height: 6)
+                    Capsule().fill(metric.remainingColor).frame(width: width * remaining / 100, height: 6)
+                    if let pace {
+                        ForEach(pace.ticks, id: \.self) { tick in
+                            Rectangle().fill(.primary.opacity(0.3)).frame(width: 1, height: 6).offset(x: width * tick - 0.5)
+                        }
+                        // Where an even burn would leave the quota now.
+                        Capsule().fill(pace.reserve >= 0 ? Color.green : Color.orange).frame(width: 2, height: 10)
+                            .offset(x: min(max(width * pace.expectedRemaining / 100 - 1, 0), max(width - 2, 0)))
+                    }
+                }.frame(maxHeight: .infinity)
+            }.frame(height: pace == nil ? 6 : 10)
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(metric.title) remaining").accessibilityValue(MenuBarAccountImage.text(metric))
+                .accessibilityLabel("\(metric.title) remaining")
+                .accessibilityValue(MenuBarAccountImage.text(metric) + (pace.map { ", " + $0.summary(now: Date()) } ?? ""))
+        }
+    }
+
+    private func resetCreditsRow(_ snapshot: UsageSnapshot, now: Date) -> some View {
+        let expiries = snapshot.unusedResetExpirations(at: now).map(\.date).sorted()
+        let soon = expiries.first.map { $0.timeIntervalSince(now) < 86400 } ?? false
+        let countdowns = expiries.prefix(4).map { $0.countdownText(from: now) }.joined(separator: " · ")
+        return VStack(alignment: .leading, spacing: 3) {
+            Text("Limit reset credits").font(textFont.weight(.medium))
+            HStack(alignment: .firstTextBaseline) {
+                Text(snapshot.resetCredits.map { "\($0.availableCount) available" } ?? "Unavailable")
+                    .font(textFont.weight(.semibold).monospacedDigit())
+                Spacer(minLength: 6)
+                if !expiries.isEmpty {
+                    Label(countdowns, systemImage: "clock")
+                        .font(.caption.monospacedDigit()).foregroundStyle(soon ? Color.orange : Color.secondary)
+                        .help("Expire " + expiries.map { $0.usageResetText() }.joined(separator: ", "))
+                        .accessibilityLabel("Expire in " + countdowns)
+                }
+            }
         }
     }
 
     private func resetLabel(_ reset: Date) -> some View {
-        let date = compact ? reset.formatted(.dateTime.month(.abbreviated).day().hour().minute()) : reset.usageResetText()
-        return Text(reset <= Date() ? "Reset passed — refresh" : "Resets \(date)")
+        let now = Date()
+        let date = relativeResets ? "in \(reset.countdownText(from: now))"
+            : compact ? reset.formatted(.dateTime.month(.abbreviated).day().hour().minute()) : reset.usageResetText()
+        return Text(reset <= now ? "Reset passed — refresh" : "Resets \(date)")
             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             .help(reset.usageResetText())
     }
@@ -194,14 +222,26 @@ struct AccountSummaryView: View {
 struct ProviderAccountGrid<Content: View>: View {
     let entries: [AccountEntry]
     var actions: NSMenu? = nil
+    var open: (() -> Void)? = nil
     @ViewBuilder var content: (AccountEntry) -> Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let provider = entries.first?.account.provider {
                 HStack(spacing: 8) {
-                    ProviderIcon(provider: provider).frame(width: 22, height: 22)
-                    Text(provider.title).font(.headline)
+                    if let open {
+                        Button(action: open) {
+                            HStack(spacing: 8) {
+                                ProviderIcon(provider: provider).frame(width: 22, height: 22)
+                                Text(provider.title).font(.headline)
+                                Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
+                            }.contentShape(Rectangle())
+                        }.buttonStyle(.plain).help("Open \(provider.title) in Headroom")
+                            .accessibilityIdentifier("openProvider-\(provider.rawValue)")
+                    } else {
+                        ProviderIcon(provider: provider).frame(width: 22, height: 22)
+                        Text(provider.title).font(.headline)
+                    }
                     if entries.count > 1 {
                         Text("\(entries.count) accounts").font(.caption).foregroundStyle(.secondary)
                     }
@@ -305,5 +345,28 @@ extension Provider {
         let image = Bundle.module.url(forResource: name, withExtension: "png").flatMap(NSImage.init(contentsOf:))
         image?.isTemplate = [Self.codex, .openAIAPI, .anthropicAPI, .xaiAPI, .grok, .amp, .valyu, .devin].contains(self)
         return image
+    }
+}
+
+// Provider tabs for the one-provider-at-a-time menu.
+struct ProviderPicker: View {
+    let providers: [Provider]
+    let selected: Provider
+    let select: (Provider) -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(providers) { provider in
+                Button { select(provider) } label: {
+                    ProviderIcon(provider: provider).frame(width: 18, height: 18).padding(6)
+                        .background(RoundedRectangle(cornerRadius: 6)
+                            .fill(provider == selected ? Color.accentColor.opacity(0.25) : Color.clear))
+                        .contentShape(Rectangle())
+                }.buttonStyle(.plain).help(provider.title)
+                    .accessibilityLabel(provider.title)
+                    .accessibilityAddTraits(provider == selected ? .isSelected : [])
+            }
+            Spacer(minLength: 0)
+        }
     }
 }

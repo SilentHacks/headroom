@@ -882,3 +882,26 @@ private actor PollFixture {
         return UsageSnapshot(metrics: [.init(title: "Weekly", kind: .quota, value: Double(counts[id]!))])
     }
 }
+
+@Test @MainActor func longerRefreshIntervalDelaysScheduledAndMenuRefreshes() async throws {
+    let store = try temporaryStore()
+    defer { try? FileManager.default.removeItem(at: store.root) }
+    let codex = Account(label: "", provider: .codex)
+    try store.save([codex])
+    let service = PollFixture()
+    var now = Date(timeIntervalSince1970: 2_000_000_000)
+    let monitor = try Monitor(store: store, fetch: { try await service.fetch($0) }, now: { now })
+    monitor.refreshInterval = 600
+    await monitor.refresh(codex.id)
+    now += 120
+    await monitor.refreshDue()
+    #expect(await service.count(codex.id) == 1)
+    await monitor.refreshDue(maxAge: 30)
+    #expect(await service.count(codex.id) == 2)
+    now += 599
+    await monitor.refreshDue()
+    #expect(await service.count(codex.id) == 2)
+    now += 1
+    await monitor.refreshDue()
+    #expect(await service.count(codex.id) == 3)
+}

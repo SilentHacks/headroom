@@ -9,6 +9,7 @@ struct MonitorView: View {
     let connect: (Provider, Account?) -> Void
     var showResets: (Account) -> Void = { _ in }
     var showAgentAccess: () -> Void = {}
+    var showSettings: () -> Void = {}
     var setResetAlerts: (UUID, Bool) async throws -> Void = { _, _ in }
     var initialProvider: Provider?
     @State private var code = ""
@@ -16,6 +17,16 @@ struct MonitorView: View {
     @State private var removal: UUID?
     @State private var granting: UUID?
     @State private var selectedProvider: Provider?
+    @AppStorage(Pref.Key.providerOrder) private var providerOrder = ""
+    @AppStorage(Pref.Key.hideEmptyProviders) private var hideEmptyProviders = false
+    @AppStorage(Pref.Key.refreshMinutes) private var refreshMinutes = 1
+
+    private var sidebarProviders: [Provider] {
+        let order = Pref.order(providerOrder)
+        let connected = order.filter { provider in monitor.entries.contains { $0.account.provider == provider } }
+        if hideEmptyProviders, !connected.isEmpty { return connected }
+        return order.filter { $0.supportsRead || connected.contains($0) }
+    }
 
     private var provider: Provider { selectedProvider ?? initialProvider ?? monitor.entries.first?.account.provider ?? .claude }
     private var accounts: [AccountEntry] { monitor.entries.filter { $0.account.provider == provider } }
@@ -24,9 +35,7 @@ struct MonitorView: View {
         NavigationSplitView {
             VStack(spacing: 0) {
                 List(selection: $selectedProvider) {
-                    ForEach(Provider.allCases.filter { service in
-                        service.supportsRead || monitor.entries.contains { $0.account.provider == service }
-                    }) { service in
+                    ForEach(sidebarProviders) { service in
                         HStack(spacing: 10) {
                             ProviderIcon(provider: service).frame(width: 20, height: 20)
                                 .foregroundStyle(selectedProvider == service ? Color.white : Color(nsColor: .labelColor))
@@ -41,6 +50,13 @@ struct MonitorView: View {
                         }
                         .padding(.vertical, 3)
                         .tag(service)
+                        .contextMenu {
+                            let order = Pref.order(providerOrder)
+                            Button("Move Up") { providerOrder = Pref.encode(Pref.moved(order, service, by: -1)) }
+                                .disabled(order.first == service)
+                            Button("Move Down") { providerOrder = Pref.encode(Pref.moved(order, service, by: 1)) }
+                                .disabled(order.last == service)
+                        }
                         .accessibilityIdentifier("service-\(service.rawValue)")
                     }
                 }
@@ -52,6 +68,7 @@ struct MonitorView: View {
                         Task { for entry in monitor.entries { await monitor.refresh(entry.id) } }
                     }.disabled(demo || login.accountID != nil || monitor.entries.isEmpty || monitor.entries.contains(where: \.refreshing))
                     Button("Local agent access…", systemImage: "terminal", action: showAgentAccess)
+                    Button("Settings…", systemImage: "gearshape", action: showSettings)
                 }.buttonStyle(.borderless).frame(maxWidth: .infinity, alignment: .leading).padding(14)
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
@@ -61,7 +78,7 @@ struct MonitorView: View {
                     ProviderIcon(provider: provider).frame(width: 36, height: 36)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(provider.title).font(.title2.weight(.semibold))
-                        Text("\(accounts.count) \(accounts.count == 1 ? "account" : "accounts") · \(provider.supportsRead ? "Auto: " + (provider == .claude ? "5 min" : "1 min") : "Usage unavailable")")
+                        Text("\(accounts.count) \(accounts.count == 1 ? "account" : "accounts") · \(provider.supportsRead ? "Auto: \(Pref.effectiveMinutes(provider, minutes: refreshMinutes)) min" : "Usage unavailable")")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()

@@ -31,6 +31,11 @@ final class Monitor {
     private let now: () -> Date
     private var requests: [UUID: UUID] = [:]
     private var refreshSchedule: [UUID: (after: Date, failures: Int, rateLimited: Bool)] = [:]
+    @ObservationIgnored var refreshInterval: TimeInterval = 60
+
+    func refreshInterval(for provider: Provider) -> TimeInterval {
+        max(refreshInterval, TimeInterval(Pref.minimumMinutes(provider) * 60))
+    }
 
     var nextAutomaticRefresh: Date? {
         entries.filter { !$0.refreshing && !$0.resetting && $0.account.provider.supportsRead }
@@ -171,13 +176,16 @@ final class Monitor {
         entries[index].refreshing = false
     }
 
-    func refreshDue(maxAge: TimeInterval = 60, isPaused: () -> Bool = { false }) async {
+    // maxAge (opening the menu) refreshes fast providers whose reading is older than that.
+    func refreshDue(maxAge: TimeInterval? = nil, isPaused: () -> Bool = { false }) async {
         for id in entries.map(\.id) {
             guard !Task.isCancelled, !isPaused() else { return }
             guard let entry = entries.first(where: { $0.id == id }), entry.account.provider.supportsRead,
                   !entry.refreshing, !entry.resetting, let schedule = refreshSchedule[id] else { continue }
-            let due = schedule.failures == 0 && ![.claude, .antigravity].contains(entry.account.provider)
-                ? schedule.after.addingTimeInterval(maxAge - 60) : schedule.after
+            let provider = entry.account.provider
+            let due = schedule.failures == 0 && Pref.minimumMinutes(provider) == 1 && maxAge != nil
+                ? min(schedule.after, schedule.after.addingTimeInterval((maxAge ?? 0) - refreshInterval(for: provider)))
+                : schedule.after
             if now() >= due { await refresh(id) }
         }
     }
@@ -215,7 +223,7 @@ final class Monitor {
             try store.save(accounts)
             entries[current].account = accounts[current]
             entries[current].snapshot = snapshot
-            let interval: TimeInterval = [.claude, .antigravity].contains(entries[current].account.provider) ? 300 : 60
+            let interval = refreshInterval(for: entries[current].account.provider)
             refreshSchedule[id] = (now().addingTimeInterval(interval), 0, false)
         } catch {
             guard requests[id] == requestID, let current = entries.firstIndex(where: { $0.id == id }) else { return }

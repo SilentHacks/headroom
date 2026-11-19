@@ -21,7 +21,12 @@ enum UsageMonitorApp {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelegate {
-    private var status: NSStatusItem?
+    private var statusItems: [Provider?: NSStatusItem] = [:]
+    private var menuScopes: [ObjectIdentifier: Provider?] = [:]
+    private weak var observedButton: NSStatusBarButton?
+    private var settingsWindow: NSWindow?
+    private var defaultsObservation: NSObjectProtocol?
+    private var appliedMenuBarLayout: String?
     private var availabilityTimer: Timer?
     private var refreshTimer: Timer?
     private var refreshTask: Task<Void, Never>?
@@ -60,14 +65,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 monitor = try Monitor(store: store, fetch: { try await Self.fetch($0, store: store) })
             }
             guard let monitor else { return }
+            applyPreferences()
+            defaultsObservation = NotificationCenter.default.addObserver(
+                forName: UserDefaults.didChangeNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.applyPreferences() }
+            }
             if !demo {
                 resetNotifications.openAccount = { [weak self] id in
                     guard let self, let monitor = self.monitor,
                           let account = monitor.entries.first(where: { $0.id == id })?.account else { return }
-                    self.openWindow()
-                    var content = self.view(monitor)
-                    content.initialProvider = account.provider
-                    self.window?.contentView = NSHostingView(rootView: content)
+                    self.openWindow(account.provider)
                 }
                 let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
                     Task { @MainActor in self?.updateStatusItem(); self?.updateLocalFeatures() }
@@ -93,6 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                     connect: { [weak self] provider, account in self?.openConnection(provider, account: account) },
                     showResets: { [weak self] account in self?.openResetDetails(account) },
                     showAgentAccess: { [weak self] in self?.openAgentAccess() },
+                    showSettings: { [weak self] in self?.openSettings() },
                     setResetAlerts: { [weak self] id, enabled in
                         guard let self, !self.demo else { return }
                         if enabled, try await !self.resetNotifications.requestPermission() {
@@ -256,7 +265,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         RunLoop.main.add(timer, forMode: .common)
     }
 
-    private func refreshDue(maxAge: TimeInterval = 60) {
+    private func refreshDue(maxAge: TimeInterval? = nil) {
         guard !demo, login.accountID == nil, refreshTask == nil, let monitor else { return }
         refreshTimer?.invalidate()
         refreshTask = Task { [weak self] in
@@ -266,13 +275,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
     }
 
-    private func newStatusItem() -> NSStatusItem {
+    private func newStatusItem(_ scope: Provider?) -> NSStatusItem {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         let menu = NSMenu()
         menu.autoenablesItems = false
         menu.delegate = self
         item.menu = menu
+        menuScopes[ObjectIdentifier(menu)] = scope
         return item
+    }
+
+    private func cancelMenus() {
+        for item in statusItems.values { item.menu?.cancelTracking() }
+    }
+
+    private func applyPreferences() {
+        guard let monitor else { return }
+        let interval = TimeInterval(Pref.refreshMinutes * 60)
+        if monitor.refreshInterval != interval {
+            monitor.refreshInterval = interval
+            scheduleAutomaticRefresh()
+        }
+        let layout = "\(Pref.perProviderMenuBar)|\(Pref.encode(Pref.providerOrder))"
+        if layout != appliedMenuBarLayout {
+            appliedMenuBarLayout = layout
+            updateStatusItem()
+        }
     }
 
     private func updateStatusItem() {
@@ -280,28 +308,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         availabilityTimer = nil
         guard let monitor else { return }
         let now = Date()
-        if status == nil { status = newStatusItem() }
-        guard let button = status?.button else { return }
-        if appearanceObservation == nil {
-            appearanceObservation = button.observe(\.effectiveAppearance) { [weak self] _, _ in
+        let ordered = Pref.sorted(monitor.entries)
+        let visible = Pref.providerOrder.filter { provider in
+            ordered.contains { $0.account.provider == provider && $0.account.showInMenuBar }
+        }
+        let scopes: [Provider?] = Pref.perProviderMenuBar && !visible.isEmpty ? visible : [nil]
+        for (scope, item) in statusItems where !scopes.contains(scope) {
+            if let menu = item.menu { menuScopes[ObjectIdentifier(menu)] = nil }
+            NSStatusBar.system.removeStatusItem(item)
+            statusItems[scope] = nil
+        }
+        // A new status item appears left of existing ones, so the last provider is created first.
+        for scope in scopes.reversed() where statusItems[scope] == nil { statusItems[scope] = newStatusItem(scope) }
+        guard let primary = statusItems[scopes[0]]?.button else { return }
+        if appearanceObservation == nil || observedButton !== primary {
+            observedButton = primary
+            appearanceObservation = primary.observe(\.effectiveAppearance) { [weak self] _, _ in
                 Task { @MainActor in
                     // Drawing briefly changes appearance; compare again after drawing has finished.
-                    guard let self, self.status?.button?.effectiveAppearance.name != self.renderedAppearance else { return }
+                    guard let self, self.observedButton?.effectiveAppearance.name != self.renderedAppearance else { return }
                     self.updateStatusItem()
                 }
             }
         }
-        renderedAppearance = button.effectiveAppearance.name
-        button.image = MenuBarAccountImage.make(monitor.entries, appearance: button.effectiveAppearance)
-        let labels = monitor.entries.filter { $0.account.showInMenuBar }.map { entry in
-            let readings = entry.menuBarMetrics.map { "\($0.title): \(MenuBarAccountImage.text($0))" }.joined(separator: ", ")
-            return "\(entry.account.provider.title) — \(entry.displayName): \(readings.isEmpty ? entry.error ?? "Usage unavailable" : readings)"
+        renderedAppearance = primary.effectiveAppearance.name
+        for scope in scopes {
+            guard let button = statusItems[scope]?.button else { continue }
+            let entries = ordered.filter { scope == nil || $0.account.provider == scope }
+            button.image = MenuBarAccountImage.make(entries, appearance: button.effectiveAppearance)
+            let labels = entries.filter { $0.account.showInMenuBar }.map { entry in
+                let readings = entry.menuBarMetrics.map { "\($0.title): \(MenuBarAccountImage.text($0))" }.joined(separator: ", ")
+                return "\(entry.account.provider.title) — \(entry.displayName): \(readings.isEmpty ? entry.error ?? "Usage unavailable" : readings)"
+            }
+            let alerts = entries.filter { ResetReminders.expiringCount($0, now: now) > 0 }
+                .map { "\($0.account.provider.title), \($0.displayName): unused resets expire within 12 hours" }
+            let fallback = scope.map { "Headroom — \($0.title)" } ?? "Headroom — open all accounts"
+            button.toolTip = nil
+            button.setAccessibilityLabel((labels + alerts).isEmpty ? fallback : (labels + alerts).joined(separator: "\n"))
         }
-        let alerts = monitor.entries.filter { ResetReminders.expiringCount($0, now: now) > 0 }
-            .map { "\($0.account.provider.title), \($0.displayName): unused resets expire within 12 hours" }
-        let label = (labels + alerts).isEmpty ? "Headroom — open all accounts" : (labels + alerts).joined(separator: "\n")
-        button.toolTip = nil
-        button.setAccessibilityLabel(label)
         let nextChange = monitor.entries.filter { $0.account.showInMenuBar }
             .flatMap { $0.snapshot?.availabilityChangeDates ?? [] }.filter { $0 > now }.min()
         if let nextChange {
@@ -316,7 +360,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard let monitor else { return }
-        refreshDue(maxAge: 30)
+        if Pref.refreshOnMenuOpen { refreshDue(maxAge: 30) }
+        buildMenu(menu, monitor: monitor)
+    }
+
+    private func buildMenu(_ menu: NSMenu, monitor: Monitor) {
+        let scope = menuScopes[ObjectIdentifier(menu)] ?? nil
         menu.removeAllItems()
         menu.appearance = NSApplication.shared.effectiveAppearance
         if demo { menu.addItem(NSMenuItem(title: "Demo data", action: nil, keyEquivalent: "")) }
@@ -327,11 +376,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         quickActions.autoenablesItems = false
         quickActions.addItem(NSMenuItem()) // Pull-down buttons reserve their first item for the label.
         addGlobalActions(to: quickActions)
-        let firstProvider = Provider.allCases.first { provider in monitor.entries.contains { $0.account.provider == provider } }
-        for provider in Provider.allCases {
+        var providers = Pref.providerOrder.filter { provider in monitor.entries.contains { $0.account.provider == provider } }
+        if let scope {
+            providers = providers.filter { $0 == scope }
+        } else if Pref.pagedMenu, providers.count > 1 {
+            let saved = UserDefaults.standard.string(forKey: Pref.Key.pagedProvider)
+            let selected = providers.first { $0.rawValue == saved } ?? providers[0]
+            let picker = NSHostingView(rootView: ProviderPicker(providers: providers, selected: selected) { [weak self, weak menu] provider in
+                UserDefaults.standard.set(provider.rawValue, forKey: Pref.Key.pagedProvider)
+                guard let self, let menu, let monitor = self.monitor else { return }
+                self.buildMenu(menu, monitor: monitor)
+            }.padding(.horizontal, 12).padding(.vertical, 6).frame(width: 420))
+            picker.frame.size = NSSize(width: 420, height: max(1, ceil(picker.fittingSize.height)))
+            let tabs = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+            tabs.view = picker
+            tabs.isEnabled = false
+            menu.addItem(tabs)
+            menu.addItem(.separator())
+            providers = [selected]
+        }
+        let firstProvider = providers.first
+        for provider in providers {
             let entries = monitor.entries.filter { $0.account.provider == provider }
             guard !entries.isEmpty else { continue }
-            let content = NSHostingView(rootView: ProviderAccountGrid(entries: entries, actions: provider == firstProvider ? quickActions : nil) { [weak self] entry in
+            let content = NSHostingView(rootView: ProviderAccountGrid(entries: entries, actions: provider == firstProvider ? quickActions : nil, open: { [weak self] in
+                self?.cancelMenus()
+                self?.openWindow(provider)
+            }) { [weak self] entry in
                 VStack(alignment: .leading, spacing: 8) {
                     AccountSummaryView(entry: entry, compact: true)
                     if provider == .codex {
@@ -382,7 +453,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         connect.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Add account")
         let providers = NSMenu()
         providers.autoenablesItems = false
-        for provider in Provider.allCases.filter(\.supportsRead) {
+        for provider in Pref.providerOrder.filter(\.supportsRead) {
             addItem(provider.title, to: providers,
                     action: #selector(connectProvider), represented: provider.rawValue, enabled: login.accountID == nil)
         }
@@ -391,6 +462,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         addItem("Refresh all", to: menu, action: #selector(refreshAll),
                 enabled: !demo && login.accountID == nil && !monitor.entries.isEmpty && !monitor.entries.contains(where: \.refreshing))
         addItem(login.accountID == nil ? "Open account window…" : "Continue sign-in…", to: menu, action: #selector(showAccountWindow))
+        addItem("Settings…", to: menu, action: #selector(showSettings))
         addItem("Open at Login", to: menu, action: #selector(toggleLaunchAtLogin), enabled: !demo && !changingLoginItem)
         menu.items.last?.state = launchAtLogin.menuState
         if launchAtLogin.readStatus() == .requiresApproval {
@@ -423,7 +495,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
     @objc private func connectProvider(_ sender: NSMenuItem) {
         guard login.accountID == nil, let value = sender.representedObject as? String, let provider = Provider(rawValue: value) else { return }
-        status?.menu?.cancelTracking()
+        cancelMenus()
         openConnection(provider, account: nil)
     }
     @objc private func openDashboard(_ sender: NSMenuItem) {
@@ -431,16 +503,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
     @objc private func refreshAll() {
         guard !demo, login.accountID == nil, let monitor else { return }
-        status?.menu?.cancelTracking()
+        cancelMenus()
         Task { for entry in monitor.entries { await monitor.refresh(entry.id) } }
     }
     @objc private func showAccountWindow() {
-        status?.menu?.cancelTracking()
+        cancelMenus()
         openWindow()
     }
+    @objc private func showSettings() {
+        cancelMenus()
+        openSettings()
+    }
+
+    private func openSettings() {
+        NSApplication.shared.setActivationPolicy(.regular)
+        if settingsWindow == nil {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 660),
+                                  styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            window.title = "Headroom Settings"
+            window.contentView = NSHostingView(rootView: GeneralSettingsView(
+                demo: demo,
+                launchAtLogin: { [weak self] in self?.launchAtLogin.readStatus() == .enabled },
+                toggleLaunchAtLogin: { [weak self] in self?.toggleLaunchAtLogin() }))
+            window.isReleasedWhenClosed = false
+            window.delegate = self
+            window.center()
+            settingsWindow = window
+        }
+        settingsWindow?.makeKeyAndOrderFront(nil)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
     @objc private func toggleLaunchAtLogin() {
         guard !demo, !changingLoginItem else { return }
-        status?.menu?.cancelTracking()
+        cancelMenus()
         changingLoginItem = true
         Task {
             defer { changingLoginItem = false }
@@ -460,7 +556,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
     @objc private func openLoginItemSettings() {
         guard !demo else { return }
-        status?.menu?.cancelTracking()
+        cancelMenus()
         SMAppService.openSystemSettingsLoginItems()
     }
     @objc private func showResetDetails(_ sender: NSMenuItem) {
@@ -472,6 +568,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let main = NSMenu()
         let application = NSMenuItem()
         let appMenu = NSMenu()
+        let settings = NSMenuItem(title: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
+        settings.target = self
+        appMenu.addItem(settings)
+        appMenu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit Headroom", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         appMenu.addItem(quit)
@@ -489,9 +589,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     func windowWillClose(_ notification: Notification) {
-        if let closed = notification.object as? NSWindow, closed === window {
-            NSApplication.shared.setActivationPolicy(.accessory)
-        }
+        guard let closed = notification.object as? NSWindow, closed === window || closed === settingsWindow else { return }
+        let other = closed === window ? settingsWindow : window
+        if other?.isVisible != true { NSApplication.shared.setActivationPolicy(.accessory) }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -499,7 +599,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         return true
     }
 
-    private func openWindow() {
+    private func openWindow(_ provider: Provider? = nil) {
         guard let monitor else { return }
         NSApplication.shared.setActivationPolicy(.regular)
         if window == nil {
@@ -512,6 +612,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             window.delegate = self
             window.center()
             self.window = window
+        }
+        if let provider, login.accountID == nil, connectionWindow == nil {
+            var content = view(monitor)
+            content.initialProvider = provider
+            window?.contentView = NSHostingView(rootView: content)
         }
         window?.deminiaturize(nil)
         window?.makeKeyAndOrderFront(nil)
