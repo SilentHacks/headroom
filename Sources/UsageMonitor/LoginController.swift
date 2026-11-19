@@ -147,6 +147,9 @@ struct LoginPrompt {
             return Self(url: url, deviceCode: nil)
         }
         if provider == .antigravity {
+            // agy writes through a pseudo-terminal, so lines end in CRLF. Swift treats CRLF as
+            // one character, which a lookahead for the line end can't split.
+            let buffer = buffer.replacingOccurrences(of: "\r\n", with: "\n")
             guard let range = buffer.range(of: #"https://accounts\.google\.com/o/oauth2/auth\?[^\s\x{1B}]+(?=\r?\n)"#, options: .regularExpression),
                   let url = URL(string: String(buffer[range])),
                   let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
