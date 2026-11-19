@@ -73,6 +73,15 @@ extension UsageMetric {
     }
 }
 
+extension UsageMetric {
+    // An unused rolling window has no reset time yet: it starts with the next request.
+    var idleResetText: String? {
+        guard kind == .quota, resetsAt == nil, value == 100, let length = windowLength else { return nil }
+        let hours = Int(length / 3600)
+        return "Resets \(hours % 24 == 0 ? "\(hours / 24)d" : "\(hours)h") after first use"
+    }
+}
+
 // Compares quota left with an even burn across the window.
 struct QuotaPace: Equatable {
     let expectedRemaining: Double

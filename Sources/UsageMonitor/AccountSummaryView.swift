@@ -221,7 +221,7 @@ struct AccountSummaryView: View {
 
     @ViewBuilder private func quotaReset(_ metric: UsageMetric) -> some View {
         if let reset = metric.resetsAt { resetLabel(reset).fixedSize() }
-        else { Text("Reset unavailable").font(.subheadline).foregroundStyle(.secondary).fixedSize() }
+        else { Text(metric.idleResetText ?? "Reset unavailable").font(.subheadline).foregroundStyle(.secondary).fixedSize() }
     }
 
     private func resetLabel(_ reset: Date) -> some View {

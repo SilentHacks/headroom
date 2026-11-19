@@ -64,3 +64,11 @@ import Testing
     #expect(UsageMetric(title: "Opus · Weekly", kind: .quota, value: 1).windowLength == TimeInterval(7 * 86400))
     #expect(UsageMetric(title: "8-hour", kind: .quota, value: 1).windowLength == TimeInterval(8 * 3600))
 }
+
+@Test func unusedRollingWindowsExplainWhenTheyReset() {
+    #expect(UsageMetric(title: "5-hour", kind: .quota, value: 100).idleResetText == "Resets 5h after first use")
+    #expect(UsageMetric(title: "Weekly", kind: .quota, value: 100).idleResetText == "Resets 7d after first use")
+    #expect(UsageMetric(title: "5-hour", kind: .quota, value: 99).idleResetText == nil)
+    #expect(UsageMetric(title: "Agent", kind: .quota, value: 100).idleResetText == nil)
+    #expect(UsageMetric(title: "5-hour", kind: .quota, value: 100, resetsAt: Date()).idleResetText == nil)
+}
