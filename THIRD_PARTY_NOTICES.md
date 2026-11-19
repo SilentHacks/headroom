@@ -51,6 +51,7 @@ Bundled PNGs are in `Sources/UsageMonitor/Resources/`. Artwork is resized or ras
 | `amp-logo.png` | [Amp app icon](https://ampcode.com/app-icon.svg) |
 | `zai-logo.png` | [z.ai logo](https://z-cdn.chatglm.cn/z-ai/static/logo.svg) |
 | `devin-logo.png` | [Devin mark via CodexBar](https://github.com/steipete/CodexBar/blob/main/docs/logos/devin.svg) |
+| `antigravity-logo.png` | [Antigravity mark via Lobe Icons and CodexBar](https://github.com/steipete/CodexBar/blob/main/docs/logos/antigravity.svg) |
 | `openrouter-logo.png` | [OpenRouter glyph](https://openrouter.ai/favicon/glyph.png) |
 | `searchapi-logo.png` | [SearchAPI touch icon](https://www.searchapi.io/apple-touch-icon.png) |
 | `dataforseo-logo.png` | [DataForSEO website artwork](https://dataforseo.com/) |

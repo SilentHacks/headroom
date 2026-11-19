@@ -300,6 +300,7 @@ extension Provider {
         case .gemini: name = "gemini-logo"
         case .kagi: name = "kagi-logo"
         case .devin: name = "devin-logo"
+        case .antigravity: name = "antigravity-logo"
         }
         let image = Bundle.module.url(forResource: name, withExtension: "png").flatMap(NSImage.init(contentsOf:))
         image?.isTemplate = [Self.codex, .openAIAPI, .anthropicAPI, .xaiAPI, .grok, .amp, .valyu, .devin].contains(self)

@@ -23,6 +23,10 @@ For **Grok / SuperGrok**, choose browser sign-in in the connection form. Install
 
 Devin has no self-serve usage API. In a signed-in app.devin.ai tab, open developer tools, select an `/api/` request, and copy its `Authorization` header value. Headroom accepts a bare token, `Bearer <token>`, or the whole header line. Enter your organization slug from the dashboard URL, an internal `org-…` ID, or the organization URL. The token is a session credential: keep it private, and reconnect when Headroom reports sign-in required.
 
+## Antigravity
+
+Install the official CLI with `brew install --cask antigravity-cli`. Choose **Add account → Antigravity**, open the Google link in the right browser profile, then paste the authorization code shown after sign-in. agy waits about one minute for the code. The sign-in lives in this account's private Headroom home; existing agy and Antigravity app logins aren't imported or changed.
+
 ## API keys and tokens
 
 Enter credentials in the native connection form. Keep them out of issue reports and agent chats. Billing reads can require an organization Admin or Management key instead of a normal inference key. A valid inference key can therefore still be rejected.

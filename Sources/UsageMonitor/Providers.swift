@@ -3,7 +3,7 @@ import Foundation
 enum Provider: String, Codable, CaseIterable, Identifiable, Sendable {
     case claude, codex, grok, cursor, amp, zai, openRouter, searchAPI, dataForSEO, firecrawl
     case openAIAPI, anthropicAPI, xaiAPI, serpAPI, tavily, jina, exa
-    case parallel, brave, perplexity, valyu, gemini, you, kagi, devin
+    case parallel, brave, perplexity, valyu, gemini, you, kagi, devin, antigravity
 
     var id: String { rawValue }
     var title: String {
@@ -33,10 +33,11 @@ enum Provider: String, Codable, CaseIterable, Identifiable, Sendable {
         case .you: "You.com"
         case .kagi: "Kagi"
         case .devin: "Devin"
+        case .antigravity: "Antigravity"
         }
     }
 
-    var usesHelper: Bool { self == .claude || self == .codex }
+    var usesHelper: Bool { self == .claude || self == .codex || self == .antigravity }
     var supportsRead: Bool { ![Self.exa, .brave, .perplexity, .gemini, .kagi].contains(self) }
 
     var connectionHelp: String {
@@ -63,6 +64,7 @@ enum Provider: String, Codable, CaseIterable, Identifiable, Sendable {
         case .brave, .perplexity, .gemini, .kagi: "Billing is not supported. Check the dashboard."
         case .you: "Use an API key with account balance access."
         case .devin: "Paste the bearer token from a signed-in app.devin.ai request and your organization. Reports daily and weekly plan quotas. Manual tokens need renewal."
+        case .antigravity: "Sign in through the official Antigravity CLI (agy) using the Google account for this subscription."
         }
     }
 
@@ -94,6 +96,7 @@ enum Provider: String, Codable, CaseIterable, Identifiable, Sendable {
         case .you: address = "https://you.com/platform"
         case .kagi: address = "https://kagi.com/settings?p=api"
         case .devin: address = "https://app.devin.ai/settings/usage"
+        case .antigravity: address = "https://antigravity.google/"
         }
         return URL(string: address)!
     }

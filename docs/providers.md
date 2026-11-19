@@ -15,12 +15,17 @@ Quotas, wallet balances, spending, and caps keep their own units. Missing inform
 | Amp | Account access token | Official `amp usage` in a private home with only the selected `sgamp_` token; private balance HTTP fallback. Supplemental dashboard query attempts independent Agent/Orb percentages. Dollars, Orb hours, and wallet credits remain separate. See below. |
 | z.ai Coding Plan | Coding Plan API key; Global or China region | Returned quota types, periods, and resets. No wallet balance or documented key-to-email lookup. |
 | Devin | Manually pasted app.devin.ai bearer token and organization (slug, `org-…` ID, or dashboard URL) | Daily and weekly remaining quota from returned used percentages, resets, returned plan name, and extra-usage balance in USD. Hidden daily quotas are omitted. No verified account identity. Manual tokens need renewal. See below. |
+| Antigravity | Independent official `agy` CLI Google sign-in | Google AI subscription (individual, AI Pro, Ultra) 5-hour and weekly remaining quota per returned model group, with resets. Identity from the agy-managed ID token when present. Refreshes every 5 minutes. See below. |
 
 Claude optional reset and cloud-credit reads use a private usage extension, falling back to ordinary usage after HTTP 400/403. Malformed optional fields don't hide ordinary quotas. Saved reset expiry and promotional credit availability update locally at known time boundaries; these display updates don't poll the provider. See [Reset credits](reset-credits.md).
 
 ### Devin quota coverage
 
 The read uses the private dashboard endpoint `GET https://app.devin.ai/api/<organization>/billing/quota/usage` behind Settings → Usage & limits. Devin's public consumption API is Enterprise-only and reports ACUs rather than plan quotas. Internal `org-…` IDs also send `x-cog-org-id`. A 404 tries one alternate organization path; other failures stop. `daily_percentage` and `weekly_percentage` are treated as used percentages from 0 to 100; other values stay unavailable. **Endpoint parsing is fixture-tested; live payloads remain unverified in Headroom.** Headroom doesn't import browser sessions.
+
+### Antigravity coverage
+
+Headroom runs `agy -p /usage --output-format json` in a private home per account. `SSH_TTY` selects agy's file token storage, so your own agy login and Keychain item are untouched. Browser launchers are stubbed and auto-update is disabled. agy owns the Google OAuth client, token refresh, and every Cloud Code request; Headroom never embeds Google client credentials or calls those endpoints itself. Reports don't run a model turn. Remaining fractions outside 0–1 stay unavailable. **Report parsing is fixture-tested; live sign-in and payloads remain unverified in Headroom.**
 
 ### Amp Orb coverage
 
