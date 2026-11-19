@@ -101,3 +101,23 @@ private final class LockedPaths: @unchecked Sendable {
     var values: [String] { lock.withLock { paths } }
     func append(_ path: String) { lock.withLock { paths.append(path) } }
 }
+
+@Test func devinCopiedCurlKeepsOnlyTokenAndOrganizationID() throws {
+    let curl = """
+    curl 'https://app.devin.ai/api/silent-team/billing/quota/usage' \\
+      -H 'accept: application/json' \\
+      -H 'authorization: Bearer eyJfixture.payload.sig' \\
+      -b 'session=private-cookie' \\
+      -H 'x-cog-org-id: org-fixture123'
+    """
+    let copied = try #require(DevinClient.copiedRequest(curl))
+    #expect(copied.token == "eyJfixture.payload.sig")
+    #expect(copied.organization == "org-fixture123")
+    let headers = "accept: application/json\nauthorization: Bearer eyJfixture.payload.sig\n"
+    #expect(DevinClient.copiedRequest(headers)?.token == "eyJfixture.payload.sig")
+    #expect(DevinClient.copiedRequest(headers)?.organization == nil)
+    let path = #"curl "https://app.devin.ai/api/org_abc/billing/quota/usage" -H "Authorization: Bearer tok""#
+    #expect(DevinClient.copiedRequest(path)?.organization == "org_abc")
+    #expect(DevinClient.copiedRequest(path)?.token == "tok")
+    #expect(DevinClient.copiedRequest("curl https://app.devin.ai -H 'accept: */*'") == nil)
+}

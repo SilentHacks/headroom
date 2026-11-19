@@ -31,9 +31,25 @@ struct DevinClient: Sendable {
         throw lastError == .http(404) ? MonitorError.unsupported("Devin organization not found. " + Self.organizationHelp) : lastError
     }
 
-    static let rejectedForSlug = "Devin rejected this token. Enter the org-… ID from the request's x-cog-org-id header as the organization, or copy a fresh token."
-    static let rejectedToken = "Devin rejected this token. Copy a fresh Authorization header from a signed-in app.devin.ai request."
-    static let organizationHelp = "Enter the name after app.devin.ai/org/ in your browser, or the org-… ID."
+    static let rejectedForSlug = "Devin rejected this token for that organization name. Reconnect and paste the request copied as cURL; Headroom reads the org-… ID from it."
+    static let rejectedToken = "Devin rejected this token. Reconnect and paste a freshly copied app.devin.ai request (Copy as cURL)."
+    static let organizationHelp = "Paste an app.devin.ai request copied as cURL, or enter the org-… ID from its x-cog-org-id header."
+
+    // Extracts only the bearer token and organization ID from a copied cURL command or
+    // request headers. Cookies and other headers in the paste are discarded.
+    static func copiedRequest(_ raw: String) -> (token: String, organization: String?)? {
+        let text = raw.replacingOccurrences(of: "\\\n", with: " ")
+        func capture(_ pattern: String) -> String? {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+                  let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+                  let range = Range(match.range(at: 1), in: text) else { return nil }
+            return String(text[range])
+        }
+        guard let token = capture(#"authorization:\s*bearer\s+([!#-&(-~]+?)(?=['"\s\\]|$)"#).flatMap(bearerToken) else { return nil }
+        let organization = capture(#"x-cog-org-id:\s*(org[-_][A-Za-z0-9_-]+)"#)
+            ?? capture(#"app\.devin\.ai/api/(org[-_][A-Za-z0-9_-]+)/"#)
+        return (token, organization)
+    }
 
     // Accepts a bare token, "Bearer <token>", or a copied "Authorization: Bearer <token>" header line.
     static func bearerToken(_ raw: String) -> String? {
