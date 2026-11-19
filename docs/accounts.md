@@ -21,7 +21,7 @@ For **Grok / SuperGrok**, choose browser sign-in in the connection form. Install
 
 ## Devin
 
-Devin has no self-serve usage API. In a signed-in app.devin.ai tab, open developer tools, select an `/api/` request, and copy its `Authorization` header value. Headroom accepts a bare token, `Bearer <token>`, or the whole header line. Enter your organization slug from the dashboard URL, an internal `org-…` ID, or the organization URL. The token is a session credential: keep it private, and reconnect when Headroom reports sign-in required.
+Devin has no self-serve usage API. In a signed-in app.devin.ai tab, open developer tools, select an `/api/` request, and copy its `Authorization` header value. Headroom accepts a bare token, `Bearer <token>`, or the whole header line. Enter the organization as the `x-cog-org-id` header value from the same request (`org-…`). Some Devin sessions are rejected without it. A slug from the dashboard URL, or the organization URL, also works for some sessions. The token is a session credential: keep it private, and reconnect when Headroom reports sign-in required.
 
 ## Antigravity
 
