@@ -8,7 +8,7 @@ struct AccountSummaryView: View {
     @AppStorage(Pref.Key.relativeResets) private var relativeResets = true
     @AppStorage(Pref.Key.showPace) private var showPace = true
 
-    private var textFont: Font { compact ? .system(size: 12) : .callout }
+    private var textFont: Font { .body }
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: entry.snapshot?.availabilityChangeDates.isEmpty == false ? 1 : 60)) { context in
@@ -17,14 +17,14 @@ struct AccountSummaryView: View {
     }
 
     private func summary(at now: Date) -> some View {
-        VStack(alignment: .leading, spacing: compact ? 8 : 12) {
+        VStack(alignment: .leading, spacing: 12) {
             if compact {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(entry.displayName).font(.system(size: 12, weight: .semibold))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(entry.displayName).font(.body.weight(.semibold))
                         .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                     HStack {
                         if let plan = entry.snapshot?.plan {
-                            Text(plan).font(.caption).foregroundStyle(.secondary)
+                            Text(plan).font(.subheadline).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         if entry.refreshing { ProgressView().controlSize(.mini) }
@@ -37,7 +37,7 @@ struct AccountSummaryView: View {
                     Spacer(minLength: 4)
                     VStack(alignment: .trailing, spacing: 3) {
                         if let plan = entry.snapshot?.plan {
-                            Text(plan).font(.caption).foregroundStyle(.secondary)
+                            Text(plan).font(.subheadline).foregroundStyle(.secondary)
                                 .lineLimit(1).help(plan)
                         }
                         if entry.refreshing { ProgressView().controlSize(.small) }
@@ -45,9 +45,12 @@ struct AccountSummaryView: View {
                 }
             }
             if let snapshot = entry.snapshot {
-                Text("Updated \(snapshot.fetchedAt.formatted(.relative(presentation: .named)))")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .help("Last successful read: \(snapshot.fetchedAt.formatted())")
+                // The menu shows freshness only once a reading is stale.
+                if !compact || now.timeIntervalSince(snapshot.fetchedAt) > 600 {
+                    Text("Updated \(snapshot.fetchedAt.formatted(.relative(presentation: .named)))")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .help("Last successful read: \(snapshot.fetchedAt.formatted())")
+                }
                 let metrics = snapshot.metrics(at: now)
                 let creditLeft = metrics.first { $0.title == "Credits left" }
                 let creditCap = metrics.first { $0.title == "Credit limit" }
@@ -69,7 +72,7 @@ struct AccountSummaryView: View {
                 }
                 ForEach(Array(displayedMetrics.filter { $0.kind == .note }.enumerated()), id: \.offset) { _, metric in
                     Text("\(metric.title): \(metric.detail ?? "Unavailable")")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.subheadline).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if entry.account.provider == .codex {
@@ -78,18 +81,18 @@ struct AccountSummaryView: View {
                 }
                 if let left = creditLeft, let cap = creditCap {
                     Divider()
-                    VStack(alignment: .leading, spacing: 5) {
+                    VStack(alignment: .leading, spacing: 6) {
                         HStack {
                             Text("Credits").font(textFont.weight(.medium))
                             Spacer()
                             Text("\(formatted(left)) left").font(textFont.monospacedDigit())
                         }
                         if let quota = creditQuota { quotaBar(quota) }
-                        HStack {
-                            Text("\(formatted(cap)) credit limit").font(.caption).foregroundStyle(.secondary)
-                            Spacer()
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("\(formatted(cap)) credit limit").font(.subheadline).foregroundStyle(.secondary)
+                            Spacer(minLength: 12)
+                            if let reset = creditQuota?.resetsAt { resetLabel(reset).fixedSize() }
                         }
-                        if let reset = creditQuota?.resetsAt { resetLabel(reset) }
                     }.help("Remaining individual allowance, not the wallet balance")
                 }
             } else if let message = entry.error {
@@ -105,37 +108,40 @@ struct AccountSummaryView: View {
     @ViewBuilder private func metricRow(_ metric: UsageMetric) -> some View {
         if !compact, metric.kind == .spend,
            [.anthropicAPI, .openAIAPI].contains(entry.account.provider) {
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(metric.title).font(.callout).foregroundStyle(.secondary)
                 Text(formatted(metric)).font(.system(size: 28, weight: .semibold).monospacedDigit())
                 if let detail = metric.detail {
-                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                    Text(detail).font(.subheadline).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
         } else if metric.kind == .quota {
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 6) {
                 ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(metric.title).font(textFont.weight(.medium))
                         quotaValue(metric)
-                    }.fixedSize()
+                        Spacer(minLength: 12)
+                        quotaReset(metric)
+                    }
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(metric.title).font(textFont.weight(.medium))
-                        quotaValue(metric)
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(metric.title).font(textFont.weight(.medium))
+                            quotaValue(metric)
+                        }.fixedSize()
+                        quotaReset(metric)
                     }
                 }
                 let pace = showPace ? QuotaPace(metric, now: Date()) : nil
                 quotaBar(metric, pace: pace)
                 if let pace {
-                    Text(pace.summary(now: Date())).font(.caption).foregroundStyle(.secondary)
+                    Text(pace.summary(now: Date())).font(.subheadline).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if let reset = metric.resetsAt { resetLabel(reset) }
-                else { Text("Reset unavailable").font(.caption).foregroundStyle(.secondary) }
             }
         } else {
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(metric.title == "Credit balance" ? "Wallet credits" : metric.title).font(textFont)
                         .fixedSize(horizontal: false, vertical: true)
@@ -146,7 +152,7 @@ struct AccountSummaryView: View {
                 }
                 if let reset = metric.resetsAt { resetLabel(reset) }
                 if let detail = metric.detail {
-                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                    Text(detail).font(.subheadline).foregroundStyle(.secondary)
                         .lineLimit(compact ? 2 : nil).fixedSize(horizontal: false, vertical: true).help(detail)
                 }
             }
@@ -185,20 +191,37 @@ struct AccountSummaryView: View {
         let expiries = snapshot.unusedResetExpirations(at: now).map(\.date).sorted()
         let soon = expiries.first.map { $0.timeIntervalSince(now) < 86400 } ?? false
         let countdowns = expiries.prefix(4).map { $0.countdownText(from: now) }.joined(separator: " · ")
-        return VStack(alignment: .leading, spacing: 3) {
-            Text("Limit reset credits").font(textFont.weight(.medium))
-            HStack(alignment: .firstTextBaseline) {
+        return ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("Limit reset credits").font(textFont.weight(.medium))
                 Text(snapshot.resetCredits.map { "\($0.availableCount) available" } ?? "Unavailable")
-                    .font(textFont.weight(.semibold).monospacedDigit())
-                Spacer(minLength: 6)
-                if !expiries.isEmpty {
-                    Label(countdowns, systemImage: "clock")
-                        .font(.caption.monospacedDigit()).foregroundStyle(soon ? Color.orange : Color.secondary)
-                        .help("Expire " + expiries.map { $0.usageResetText() }.joined(separator: ", "))
-                        .accessibilityLabel("Expire in " + countdowns)
+                    .font(textFont.monospacedDigit())
+                Spacer(minLength: 12)
+                if !expiries.isEmpty { resetExpiries(countdowns, expiries: expiries, soon: soon) }
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Limit reset credits").font(textFont.weight(.medium))
+                HStack(alignment: .firstTextBaseline) {
+                    Text(snapshot.resetCredits.map { "\($0.availableCount) available" } ?? "Unavailable")
+                        .font(textFont.monospacedDigit())
+                    Spacer(minLength: 12)
+                    if !expiries.isEmpty { resetExpiries(countdowns, expiries: expiries, soon: soon) }
                 }
             }
         }
+    }
+
+    private func resetExpiries(_ countdowns: String, expiries: [Date], soon: Bool) -> some View {
+        Label(countdowns, systemImage: "clock")
+            .font(.subheadline.monospacedDigit()).foregroundStyle(soon ? Color.orange : Color.secondary)
+            .help("Expire " + expiries.map { $0.usageResetText() }.joined(separator: ", "))
+            .accessibilityLabel("Expire in " + countdowns)
+            .fixedSize()
+    }
+
+    @ViewBuilder private func quotaReset(_ metric: UsageMetric) -> some View {
+        if let reset = metric.resetsAt { resetLabel(reset).fixedSize() }
+        else { Text("Reset unavailable").font(.subheadline).foregroundStyle(.secondary).fixedSize() }
     }
 
     private func resetLabel(_ reset: Date) -> some View {
@@ -206,7 +229,7 @@ struct AccountSummaryView: View {
         let date = relativeResets ? "in \(reset.countdownText(from: now))"
             : compact ? reset.formatted(.dateTime.month(.abbreviated).day().hour().minute()) : reset.usageResetText()
         return Text(reset <= now ? "Reset passed — refresh" : "Resets \(date)")
-            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            .font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             .help(reset.usageResetText())
     }
 
@@ -241,9 +264,6 @@ struct ProviderAccountGrid<Content: View>: View {
                     } else {
                         ProviderIcon(provider: provider).frame(width: 22, height: 22)
                         Text(provider.title).font(.headline)
-                    }
-                    if entries.count > 1 {
-                        Text("\(entries.count) accounts").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 0)
                     if let actions {

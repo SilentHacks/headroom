@@ -23,8 +23,8 @@ struct GeneralSettingsView: View {
                     ForEach(Pref.refreshChoices, id: \.self) { Text($0 == 1 ? "1 minute" : "\($0) minutes").tag($0) }
                 }
                 Toggle("Refresh when the menu opens", isOn: $refreshOnMenuOpen)
-                Text("Opening the menu refreshes readings older than 30 seconds. Claude and Antigravity check at most every 5 minutes.")
-                    .font(.caption).foregroundStyle(.secondary)
+                Text("Opening the menu refreshes readings older than 30 seconds. Claude and Antigravity check every 5 minutes at most.")
+                    .font(.subheadline).foregroundStyle(.secondary)
             }
             Section("Menu") {
                 Picker("Layout", selection: $menuLayout) {
@@ -59,8 +59,7 @@ struct GeneralSettingsView: View {
                     }
                 }.frame(height: 220)
                 HStack {
-                    Text("Drag to reorder. The order applies to the menu bar, the menu and the sidebar.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Text("Drag to reorder.").font(.subheadline).foregroundStyle(.secondary)
                     Spacer()
                     Button("Restore default") { providerOrder = "" }.disabled(providerOrder.isEmpty)
                 }
@@ -74,7 +73,7 @@ struct GeneralSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 480, height: 660)
+        .frame(width: 480, height: 620)
         .onAppear { openAtLogin = launchAtLogin() }
     }
 }

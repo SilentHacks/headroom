@@ -410,9 +410,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                             .disabled(self?.login.accountID != nil || entry.resetting)
                             .accessibilityIdentifier("menuResets-\(entry.id)")
                     }
-                }.buttonStyle(.borderless).font(.system(size: 12))
+                }.buttonStyle(.borderless).font(.body)
             }
-                .padding(.horizontal, 16).padding(.vertical, 10).frame(width: 420).fixedSize(horizontal: false, vertical: true))
+                .padding(.horizontal, 16).padding(.vertical, 12).frame(width: 420).fixedSize(horizontal: false, vertical: true))
             content.frame.size = NSSize(width: 420, height: max(1, ceil(content.fittingSize.height)))
             let row = NSMenuItem(title: "", action: nil, keyEquivalent: "")
             row.view = content
@@ -450,7 +450,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private func addGlobalActions(to menu: NSMenu) {
         guard let monitor else { return }
         let connect = NSMenuItem(title: "Add account…", action: nil, keyEquivalent: "")
-        connect.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Add account")
         let providers = NSMenu()
         providers.autoenablesItems = false
         for provider in Pref.providerOrder.filter(\.supportsRead) {
@@ -463,8 +462,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 enabled: !demo && login.accountID == nil && !monitor.entries.isEmpty && !monitor.entries.contains(where: \.refreshing))
         addItem(login.accountID == nil ? "Open account window…" : "Continue sign-in…", to: menu, action: #selector(showAccountWindow))
         addItem("Settings…", to: menu, action: #selector(showSettings))
-        addItem("Open at Login", to: menu, action: #selector(toggleLaunchAtLogin), enabled: !demo && !changingLoginItem)
-        menu.items.last?.state = launchAtLogin.menuState
         if launchAtLogin.readStatus() == .requiresApproval {
             addItem("Allow Open at Login in System Settings…", to: menu,
                     action: #selector(openLoginItemSettings), enabled: !demo && !changingLoginItem)
@@ -525,6 +522,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 demo: demo,
                 launchAtLogin: { [weak self] in self?.launchAtLogin.readStatus() == .enabled },
                 toggleLaunchAtLogin: { [weak self] in self?.toggleLaunchAtLogin() }))
+            if let content = window.contentView { window.setContentSize(content.fittingSize) }
             window.isReleasedWhenClosed = false
             window.delegate = self
             window.center()
