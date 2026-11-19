@@ -65,6 +65,8 @@ private let antigravityReport = """
     let link = "https://accounts.google.com/o/oauth2/auth?access_type=offline&client_id=fixture.apps.googleusercontent.com&code_challenge=abc&code_challenge_method=S256&redirect_uri=https%3A%2F%2Fantigravity.google%2Foauth-callback&response_type=code&state=xyz"
     let output = "Authentication required. Please visit the URL to log in:\n  \(link)\n\nWaiting for authentication (timeout 60s)...\n"
     #expect(LoginPrompt.parse(output, provider: .antigravity)?.url.absoluteString == link)
+    let terminal = output.replacingOccurrences(of: "\n", with: "\r\n")
+    #expect(LoginPrompt.parse(terminal, provider: .antigravity)?.url.absoluteString == link)
     let redirected = link.replacingOccurrences(of: "antigravity.google", with: "evil.example")
     #expect(LoginPrompt.parse("\(redirected)\n", provider: .antigravity) == nil)
     #expect(LoginPrompt.parse(output, provider: .claude) == nil)
