@@ -5,6 +5,9 @@ import Testing
 private func devinHTTP(_ body: String, status: Int = 200,
                        check: @escaping @Sendable (URLRequest) throws -> Void = { _ in }) -> ProviderHTTP {
     ProviderHTTP { request in
+        if request.url?.path == "/api/users/post-auth" {
+            return (Data(), HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!)
+        }
         try check(request)
         return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
     }
@@ -120,4 +123,33 @@ private final class LockedPaths: @unchecked Sendable {
     #expect(DevinClient.copiedRequest(path)?.organization == "org_abc")
     #expect(DevinClient.copiedRequest(path)?.token == "tok")
     #expect(DevinClient.copiedRequest("curl https://app.devin.ai -H 'accept: */*'") == nil)
+}
+
+@Test func devinResolvesBlankOrMatchingOrganizationThroughPostAuthOnce() async throws {
+    final class Calls: @unchecked Sendable { var postAuth = 0; var quota: [String] = [] }
+    let calls = Calls()
+    let http = ProviderHTTP { request in
+        if request.url?.path == "/api/users/post-auth" {
+            calls.postAuth += 1
+            #expect(request.httpMethod == "POST")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer fixture-token")
+            return (Data(#"{"org_id": "org-fixture1", "org_name": "Fixture-Team"}"#.utf8),
+                    HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+        calls.quota.append("\(request.url!.path) \(request.value(forHTTPHeaderField: "x-cog-org-id") ?? "-")")
+        return (Data(#"{"daily_percentage": 10, "weekly_percentage": 20}"#.utf8),
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
+    let blank = Account(label: "", provider: .devin, options: [:])
+    _ = try await DevinClient(http: http).fetch(blank, secrets: .init(key: "fixture-token"))
+    _ = try await DevinClient(http: http).fetch(blank, secrets: .init(key: "fixture-token"))
+    let slug = Account(label: "", provider: .devin, options: ["organization": "fixture-team"])
+    _ = try await DevinClient(http: http).fetch(slug, secrets: .init(key: "fixture-token"))
+    let other = Account(label: "", provider: .devin, options: ["organization": "other-team"])
+    _ = try await DevinClient(http: http).fetch(other, secrets: .init(key: "fixture-token"))
+    #expect(calls.postAuth == 3)
+    #expect(calls.quota == [
+        "/api/org-fixture1/billing/quota/usage org-fixture1", "/api/org-fixture1/billing/quota/usage org-fixture1",
+        "/api/org-fixture1/billing/quota/usage org-fixture1", "/api/other-team/billing/quota/usage -",
+    ])
 }
