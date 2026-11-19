@@ -6,7 +6,7 @@ struct DevinClient: Sendable {
     func fetch(_ account: Account, secrets: ConnectionSecrets, now: Date = Date()) async throws -> UsageSnapshot {
         guard account.provider == .devin else { throw MonitorError.invalidProfile }
         guard let token = Self.bearerToken(secrets.key) else { throw MonitorError.signInRequired }
-        guard let organization = DevinOrganization(account.options["organization"]) else { throw MonitorError.invalidProfile }
+        guard let organization = DevinOrganization(account.options["organization"]) else { throw MonitorError.unsupported(Self.organizationHelp) }
         var lastError = MonitorError.invalidResponse
         for path in organization.paths {
             var request = URLRequest(url: URL(string: "https://app.devin.ai/api/\(path)/billing/quota/usage")!)
@@ -17,8 +17,10 @@ struct DevinClient: Sendable {
             do { return try Self.snapshot(try await http.data(for: request), now: now) }
             catch MonitorError.http(404) { lastError = .http(404); continue }
         }
-        throw lastError
+        throw lastError == .http(404) ? MonitorError.unsupported("Devin organization not found. " + Self.organizationHelp) : lastError
     }
+
+    static let organizationHelp = "Enter the name after app.devin.ai/org/ in your browser, or the org-… ID."
 
     // Accepts a bare token, "Bearer <token>", or a copied "Authorization: Bearer <token>" header line.
     static func bearerToken(_ raw: String) -> String? {
@@ -86,13 +88,21 @@ struct DevinOrganization: Equatable {
 
     // Accepts an org slug, an internal org-… / org_… ID, or an app.devin.ai organization URL.
     init?(_ raw: String?) {
-        guard var value = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
-        if let url = URL(string: value), let host = url.host?.lowercased() {
-            guard url.scheme == "https", host == "app.devin.ai" else { return nil }
-            let parts = url.path.split(separator: "/").map(String.init)
-            guard parts.count >= 2, ["org", "organizations"].contains(parts[0]) else { return nil }
-            value = parts[1]
+        guard var text = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+        if let scheme = text.range(of: "://") {
+            guard text[..<scheme.lowerBound].lowercased() == "https" else { return nil }
+            text = String(text[scheme.upperBound...])
         }
+        text = String(text.prefix { $0 != "?" && $0 != "#" })
+        var parts = text.split(separator: "/").map(String.init)
+        if let host = parts.first?.lowercased(), host.contains(".") {
+            guard host == "devin.ai" || host.hasSuffix(".devin.ai") else { return nil }
+            parts.removeFirst()
+        }
+        let value: String
+        if parts.count >= 2, ["org", "organizations"].contains(parts[0].lowercased()) { value = parts[1] }
+        else if parts.count == 1 { value = parts[0] }
+        else { return nil }
         guard value.count <= 128, value.range(of: #"^[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil else { return nil }
         if value.hasPrefix("org-") || value.hasPrefix("org_") {
             paths = [value, "organizations/\(value)"]

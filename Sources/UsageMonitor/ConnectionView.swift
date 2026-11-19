@@ -70,7 +70,7 @@ struct ConnectionView: View {
                 }
                 if provider == .exa || provider == .openAIAPI || provider == .devin {
                     TextField(provider == .exa ? "API key ID to report" : provider == .devin ? "Organization slug, org-… ID, or URL" : "Organization ID (optional)", text: $selector)
-                        .disabled(account != nil)
+                        .disabled(account != nil && provider != .devin)
                 }
                 Text("Saved in your Mac's Keychain.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -204,6 +204,7 @@ struct ConnectionView: View {
         do {
             let id: UUID
             if let account {
+                if provider == .devin { try monitor.setDevinOrganization(account.id, selector.trimmingCharacters(in: .whitespacesAndNewlines)) }
                 try monitor.reconnect(account.id, secrets: secrets)
                 id = account.id
             } else {
