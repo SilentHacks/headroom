@@ -62,6 +62,9 @@ private let devinAccount = Account(label: "", provider: .devin, options: ["organ
     }).fetch(account, secrets: .init(key: "fixture-token"))
     #expect(seen.values == ["/api/org-fixture/billing/quota/usage", "/api/organizations/org-fixture/billing/quota/usage"])
     #expect(snapshot.metrics.first?.value == 100)
+    await #expect(throws: MonitorError.unsupported("Devin organization not found. " + DevinClient.organizationHelp)) {
+        try await DevinClient(http: devinHTTP("{}", status: 404)).fetch(devinAccount, secrets: .init(key: "fixture-token"))
+    }
     await #expect(throws: MonitorError.http(401)) {
         try await DevinClient(http: devinHTTP("{}", status: 401)).fetch(devinAccount, secrets: .init(key: "fixture-token"))
     }
@@ -72,13 +75,16 @@ private let devinAccount = Account(label: "", provider: .devin, options: ["organ
     await #expect(throws: MonitorError.signInRequired) {
         try await DevinClient(http: never).fetch(devinAccount, secrets: .init(key: "Bearer two words"))
     }
-    for organization in ["", "../admin", "https://evil.example/org/team", "http://app.devin.ai/org/team", "team?x=1"] {
-        await #expect(throws: MonitorError.invalidProfile) {
+    for organization in ["", "../admin", "https://evil.example/org/team", "http://app.devin.ai/org/team", "Silent Hacks", "app.devin.ai/settings/usage"] {
+        await #expect(throws: MonitorError.unsupported(DevinClient.organizationHelp)) {
             try await DevinClient(http: never).fetch(Account(label: "", provider: .devin, options: ["organization": organization]),
                                                      secrets: .init(key: "fixture-token"))
         }
     }
     #expect(DevinOrganization("https://app.devin.ai/org/acme/settings/usage")?.paths == ["acme", "org/acme"])
+    #expect(DevinOrganization("app.devin.ai/org/acme/settings?tab=usage")?.paths == ["acme", "org/acme"])
+    #expect(DevinOrganization("org/acme")?.paths == ["acme", "org/acme"])
+    #expect(DevinOrganization(" acme/ ")?.paths == ["acme", "org/acme"])
 }
 
 private final class LockedPaths: @unchecked Sendable {
