@@ -21,7 +21,7 @@ For **Grok / SuperGrok**, choose browser sign-in in the connection form. Install
 
 ## Devin
 
-Devin has no self-serve usage API. In a signed-in app.devin.ai tab, open developer tools → **Network**, reload, right-click any `/api/` request, and choose **Copy → Copy as cURL**. Paste it into Headroom's credential field. Headroom keeps only the bearer token and the `x-cog-org-id` organization ID; cookies and other headers are discarded. A bare token with a manually entered `org-…` ID also works. Organization slugs are rejected for some Devin sessions. The token is a session credential: keep it private, and reconnect when Headroom reports it was rejected.
+Devin has no self-serve usage API. In a signed-in app.devin.ai tab, open developer tools → **Network**, reload, right-click any `/api/` request, and choose **Copy → Copy as cURL**. Paste it, or just the `authorization` header, into Headroom's credential field. Headroom keeps only the bearer token and any `x-cog-org-id` organization ID; cookies and other headers are discarded. Leave the organization blank to use the token's current organization, which Headroom looks up once through Devin's `users/post-auth` sign-in endpoint. An org slug is matched the same way; an `org-…` ID is used as entered. The token is a session credential: keep it private, and reconnect when Headroom reports it was rejected.
 
 ## Antigravity
 

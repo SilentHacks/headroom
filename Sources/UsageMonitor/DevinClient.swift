@@ -6,7 +6,17 @@ struct DevinClient: Sendable {
     func fetch(_ account: Account, secrets: ConnectionSecrets, now: Date = Date()) async throws -> UsageSnapshot {
         guard account.provider == .devin else { throw MonitorError.invalidProfile }
         guard let token = Self.bearerToken(secrets.key) else { throw MonitorError.signInRequired }
-        guard let organization = DevinOrganization(account.options["organization"]) else { throw MonitorError.unsupported(Self.organizationHelp) }
+        let entered = account.options["organization"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let organization: DevinOrganization
+        if let parsed = DevinOrganization(entered), parsed.internalID != nil {
+            organization = parsed
+        } else if entered.isEmpty {
+            guard let resolved = await resolveOrganization(account, token: token, slug: nil) else { throw MonitorError.unsupported(Self.organizationHelp) }
+            organization = resolved
+        } else {
+            guard let parsed = DevinOrganization(entered) else { throw MonitorError.unsupported(Self.organizationHelp) }
+            organization = await resolveOrganization(account, token: token, slug: parsed.paths[0]) ?? parsed
+        }
         var lastError = MonitorError.invalidResponse
         for path in organization.paths {
             var request = URLRequest(url: URL(string: "https://app.devin.ai/api/\(path)/billing/quota/usage")!)
@@ -20,6 +30,7 @@ struct DevinClient: Sendable {
             catch { throw MonitorError.network }
             if response.statusCode == 404 { lastError = .http(404); continue }
             if response.statusCode == 401 || response.statusCode == 403 {
+                await Self.resolvedOrganizations.clear(account.id)
                 // Some Devin sessions are accepted only with the internal organization ID header.
                 let detail = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["detail"] as? String
                 throw MonitorError.unsupported(organization.internalID == nil || detail == "No organizations found for auth1 user"
@@ -31,9 +42,31 @@ struct DevinClient: Sendable {
         throw lastError == .http(404) ? MonitorError.unsupported("Devin organization not found. " + Self.organizationHelp) : lastError
     }
 
+    static let resolvedOrganizations = DevinOrganizationCache()
+
+    // Devin's own sign-in hook reports the token's organization. Usage requests are accepted
+    // only with that internal ID, so a slug or blank field is resolved through it once.
+    private func resolveOrganization(_ account: Account, token: String, slug: String?) async -> DevinOrganization? {
+        let key = slug?.lowercased() ?? ""
+        if let cached = await Self.resolvedOrganizations.get(account.id, key) { return DevinOrganization(cached) }
+        var request = URLRequest(url: URL(string: "https://app.devin.ai/api/users/post-auth")!)
+        request.httpMethod = "POST"
+        request.httpBody = Data("{}".utf8)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        guard let data = try? await http.data(for: request),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let id = object["org_id"] as? String, let organization = DevinOrganization(id), organization.internalID != nil
+        else { return nil }
+        if let slug, (object["org_name"] as? String)?.lowercased() != slug.lowercased() { return nil }
+        await Self.resolvedOrganizations.set(account.id, key, id)
+        return organization
+    }
+
     static let rejectedForSlug = "Devin rejected this token for that organization name. Reconnect and paste the request copied as cURL; Headroom reads the org-… ID from it."
     static let rejectedToken = "Devin rejected this token. Reconnect and paste a freshly copied app.devin.ai request (Copy as cURL)."
-    static let organizationHelp = "Paste an app.devin.ai request copied as cURL, or enter the org-… ID from its x-cog-org-id header."
+    static let organizationHelp = "Devin couldn't find this token's organization. Paste an app.devin.ai request copied as cURL, or enter the org-… ID from its x-cog-org-id header."
 
     // Extracts only the bearer token and organization ID from a copied cURL command or
     // request headers. Cookies and other headers in the paste are discarded.
@@ -109,6 +142,13 @@ struct DevinClient: Sendable {
         guard let seconds = number(value), seconds > 0 else { return nil }
         return Date(timeIntervalSince1970: seconds > 10_000_000_000 ? seconds / 1000 : seconds)
     }
+}
+
+actor DevinOrganizationCache {
+    private var ids: [UUID: (key: String, id: String)] = [:]
+    func get(_ account: UUID, _ key: String) -> String? { ids[account]?.key == key ? ids[account]?.id : nil }
+    func set(_ account: UUID, _ key: String, _ id: String) { ids[account] = (key, id) }
+    func clear(_ account: UUID) { ids[account] = nil }
 }
 
 struct DevinOrganization: Equatable {

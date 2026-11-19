@@ -69,7 +69,7 @@ struct ConnectionView: View {
                     }.disabled(account != nil)
                 }
                 if provider == .exa || provider == .openAIAPI || provider == .devin {
-                    TextField(provider == .exa ? "API key ID to report" : provider == .devin ? "Organization ID (org-…), read from cURL if blank" : "Organization ID (optional)", text: $selector)
+                    TextField(provider == .exa ? "API key ID to report" : provider == .devin ? "Organization (optional; defaults to your current one)" : "Organization ID (optional)", text: $selector)
                         .disabled(account != nil && provider != .devin)
                 }
                 Text("Saved in your Mac's Keychain.")
@@ -86,8 +86,7 @@ struct ConnectionView: View {
                     Button("Save", action: save).keyboardShortcut(.defaultAction)
                         .disabled(demo || key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                                   || (provider == .dataForSEO && username.isEmpty)
-                                  || (provider == .exa && selector.isEmpty)
-                                  || (provider == .devin && selector.isEmpty && DevinClient.copiedRequest(key)?.organization == nil))
+                                  || (provider == .exa && selector.isEmpty))
                 }
             }
         }
