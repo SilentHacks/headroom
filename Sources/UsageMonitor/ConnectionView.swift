@@ -33,7 +33,7 @@ struct ConnectionView: View {
         case .anthropicAPI: "Organization Admin key (sk-ant-admin…)"
         case .openAIAPI: "Organization Admin key"
         case .xaiAPI: "Team Management key"
-        case .devin: "Bearer token"
+        case .devin: "Copied cURL request or bearer token"
         default: "API key or access token"
         }
     }
@@ -69,7 +69,7 @@ struct ConnectionView: View {
                     }.disabled(account != nil)
                 }
                 if provider == .exa || provider == .openAIAPI || provider == .devin {
-                    TextField(provider == .exa ? "API key ID to report" : provider == .devin ? "Organization slug, org-… ID, or URL" : "Organization ID (optional)", text: $selector)
+                    TextField(provider == .exa ? "API key ID to report" : provider == .devin ? "Organization ID (org-…), read from cURL if blank" : "Organization ID (optional)", text: $selector)
                         .disabled(account != nil && provider != .devin)
                 }
                 Text("Saved in your Mac's Keychain.")
@@ -86,7 +86,8 @@ struct ConnectionView: View {
                     Button("Save", action: save).keyboardShortcut(.defaultAction)
                         .disabled(demo || key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                                   || (provider == .dataForSEO && username.isEmpty)
-                                  || ((provider == .exa || provider == .devin) && selector.isEmpty))
+                                  || (provider == .exa && selector.isEmpty)
+                                  || (provider == .devin && selector.isEmpty && DevinClient.copiedRequest(key)?.organization == nil))
                 }
             }
         }
@@ -193,6 +194,11 @@ struct ConnectionView: View {
     }
 
     private func save() {
+        if provider == .devin, let copied = DevinClient.copiedRequest(key) {
+            if let organization = copied.organization { selector = organization }
+            save(ConnectionSecrets(key: copied.token, username: nil))
+            return
+        }
         let secrets = ConnectionSecrets(key: key.trimmingCharacters(in: .whitespacesAndNewlines),
                                         username: provider == .dataForSEO ? username.trimmingCharacters(in: .whitespacesAndNewlines) : nil)
         save(secrets)

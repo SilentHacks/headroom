@@ -63,8 +63,8 @@ enum Provider: String, Codable, CaseIterable, Identifiable, Sendable {
         case .valyu: "Use a key with billing:read to see credits and pay-as-you-go spend."
         case .brave, .perplexity, .gemini, .kagi: "Billing is not supported. Check the dashboard."
         case .you: "Use an API key with account balance access."
-        case .devin: "Paste the bearer token from a signed-in app.devin.ai request and your organization. Reports daily and weekly plan quotas. Manual tokens need renewal."
         case .antigravity: "Sign in through the official Antigravity CLI (agy) using the Google account for this subscription."
+        case .devin: "In a signed-in app.devin.ai tab, open developer tools → Network, right-click any /api/ request, and choose Copy → Copy as cURL. Paste it below; Headroom keeps only the token and organization ID. Reports daily and weekly plan quotas. Tokens need renewal."
         }
     }
 
