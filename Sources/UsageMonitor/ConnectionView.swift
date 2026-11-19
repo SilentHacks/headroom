@@ -33,6 +33,7 @@ struct ConnectionView: View {
         case .anthropicAPI: "Organization Admin key (sk-ant-admin…)"
         case .openAIAPI: "Organization Admin key"
         case .xaiAPI: "Team Management key"
+        case .devin: "Bearer token"
         default: "API key or access token"
         }
     }
@@ -67,8 +68,8 @@ struct ConnectionView: View {
                         Text("China · BigModel").tag("cn")
                     }.disabled(account != nil)
                 }
-                if provider == .exa || provider == .openAIAPI {
-                    TextField(provider == .exa ? "API key ID to report" : "Organization ID (optional)", text: $selector)
+                if provider == .exa || provider == .openAIAPI || provider == .devin {
+                    TextField(provider == .exa ? "API key ID to report" : provider == .devin ? "Organization slug, org-… ID, or URL" : "Organization ID (optional)", text: $selector)
                         .disabled(account != nil)
                 }
                 Text("Saved in your Mac's Keychain.")
@@ -85,7 +86,7 @@ struct ConnectionView: View {
                     Button("Save", action: save).keyboardShortcut(.defaultAction)
                         .disabled(demo || key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                                   || (provider == .dataForSEO && username.isEmpty)
-                                  || (provider == .exa && selector.isEmpty))
+                                  || ((provider == .exa || provider == .devin) && selector.isEmpty))
                 }
             }
         }
@@ -93,7 +94,7 @@ struct ConnectionView: View {
         .onAppear {
             mode = account?.options["mode"] ?? "wallet"
             region = account?.options["region"] ?? "global"
-            selector = account?.options[provider == .exa ? "keyID" : "organizationID"] ?? ""
+            selector = account?.options[provider == .exa ? "keyID" : provider == .devin ? "organization" : "organizationID"] ?? ""
         }
         .onDisappear { key = ""; username = ""; discoveryReport = nil }
     }
@@ -211,6 +212,7 @@ struct ConnectionView: View {
                 if provider == .zai { options["region"] = region }
                 if provider == .exa { options["keyID"] = selector.trimmingCharacters(in: .whitespacesAndNewlines) }
                 if provider == .openAIAPI { options["organizationID"] = selector.trimmingCharacters(in: .whitespacesAndNewlines) }
+                if provider == .devin { options["organization"] = selector.trimmingCharacters(in: .whitespacesAndNewlines) }
                 options.merge(optionHints) { _, detected in detected }
                 id = try monitor.add(label: "", provider: provider, options: options, secrets: secrets)
             }

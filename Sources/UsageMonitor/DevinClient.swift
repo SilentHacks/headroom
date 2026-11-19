@@ -1,0 +1,105 @@
+import Foundation
+
+struct DevinClient: Sendable {
+    var http = ProviderHTTP()
+
+    func fetch(_ account: Account, secrets: ConnectionSecrets, now: Date = Date()) async throws -> UsageSnapshot {
+        guard account.provider == .devin else { throw MonitorError.invalidProfile }
+        guard let token = Self.bearerToken(secrets.key) else { throw MonitorError.signInRequired }
+        guard let organization = DevinOrganization(account.options["organization"]) else { throw MonitorError.invalidProfile }
+        var lastError = MonitorError.invalidResponse
+        for path in organization.paths {
+            var request = URLRequest(url: URL(string: "https://app.devin.ai/api/\(path)/billing/quota/usage")!)
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.setValue("en-US,en", forHTTPHeaderField: "Accept-Language")
+            if let internalID = organization.internalID { request.setValue(internalID, forHTTPHeaderField: "x-cog-org-id") }
+            do { return try Self.snapshot(try await http.data(for: request), now: now) }
+            catch MonitorError.http(404) { lastError = .http(404); continue }
+        }
+        throw lastError
+    }
+
+    // Accepts a bare token, "Bearer <token>", or a copied "Authorization: Bearer <token>" header line.
+    static func bearerToken(_ raw: String) -> String? {
+        var token = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if token.lowercased().hasPrefix("authorization:") { token = String(token.dropFirst(14)).trimmingCharacters(in: .whitespaces) }
+        if token.lowercased().hasPrefix("bearer ") { token = String(token.dropFirst(7)).trimmingCharacters(in: .whitespaces) }
+        guard !token.isEmpty, token.utf8.count <= 16384,
+              token.unicodeScalars.allSatisfy({ (33...126).contains($0.value) }) else { return nil }
+        return token
+    }
+
+    static func snapshot(_ data: Data, now: Date = Date()) throws -> UsageSnapshot {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw MonitorError.invalidResponse }
+        let hideDaily = (root["hide_daily_quota"] as? NSNumber).map { CFGetTypeID($0) == CFBooleanGetTypeID() && $0.boolValue } ?? false
+        let hasDaily = !hideDaily && (root["daily_percentage"] != nil || root["daily_reset_at"] != nil)
+        let hasWeekly = root["weekly_percentage"] != nil || root["weekly_reset_at"] != nil
+        guard hasDaily || hasWeekly else { throw MonitorError.invalidResponse }
+        var metrics: [UsageMetric] = []
+        if hasDaily { metrics.append(quota("Daily", used: root["daily_percentage"], reset: root["daily_reset_at"])) }
+        if hasWeekly { metrics.append(quota("Weekly", used: root["weekly_percentage"], reset: root["weekly_reset_at"])) }
+        if let balance = dollars(root["overage_balance"]) ?? dollars(root["overage_balance_cents"]).map({ $0 / 100 }) {
+            metrics.append(.init(title: "Extra usage balance", kind: .balance, value: balance, unit: "USD"))
+        }
+        let plan = ["plan_name", "plan", "tier"].lazy.compactMap { key -> String? in
+            guard let text = (root[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !text.isEmpty, text.count <= 64 else { return nil }
+            return text
+        }.first
+        // The quota endpoint does not return a verifiable account identity.
+        return UsageSnapshot(metrics: metrics, fetchedAt: now, plan: plan)
+    }
+
+    // Devin reports used percentages. Out-of-range or missing values stay unavailable.
+    private static func quota(_ title: String, used: Any?, reset: Any?) -> UsageMetric {
+        let remaining = number(used).flatMap { (0...100).contains($0) ? 100 - $0 : nil }
+        return .init(title: title, kind: .quota, value: remaining, resetsAt: date(reset))
+    }
+
+    private static func number(_ value: Any?) -> Double? {
+        guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+        let double = number.doubleValue
+        return double.isFinite ? double : nil
+    }
+
+    private static func dollars(_ value: Any?) -> Double? {
+        number(value).flatMap { $0 >= 0 ? $0 : nil }
+    }
+
+    private static func date(_ value: Any?) -> Date? {
+        if let text = value as? String {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = formatter.date(from: text) { return date }
+            formatter.formatOptions = [.withInternetDateTime]
+            return formatter.date(from: text)
+        }
+        guard let seconds = number(value), seconds > 0 else { return nil }
+        return Date(timeIntervalSince1970: seconds > 10_000_000_000 ? seconds / 1000 : seconds)
+    }
+}
+
+struct DevinOrganization: Equatable {
+    let paths: [String]
+    let internalID: String?
+
+    // Accepts an org slug, an internal org-… / org_… ID, or an app.devin.ai organization URL.
+    init?(_ raw: String?) {
+        guard var value = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
+        if let url = URL(string: value), let host = url.host?.lowercased() {
+            guard url.scheme == "https", host == "app.devin.ai" else { return nil }
+            let parts = url.path.split(separator: "/").map(String.init)
+            guard parts.count >= 2, ["org", "organizations"].contains(parts[0]) else { return nil }
+            value = parts[1]
+        }
+        guard value.count <= 128, value.range(of: #"^[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil else { return nil }
+        if value.hasPrefix("org-") || value.hasPrefix("org_") {
+            paths = [value, "organizations/\(value)"]
+            internalID = value
+        } else {
+            paths = [value, "org/\(value)"]
+            internalID = nil
+        }
+    }
+}

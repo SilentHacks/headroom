@@ -19,6 +19,10 @@ For **Grok / SuperGrok**, choose browser sign-in in the connection form. Install
 
 **Grok Bot** has a separate private sign-in window. It uses Cursor-backed sign-in, not SuperGrok authentication. Embedded SSO can be blocked; manual session Cookie-header entry remains available. Headroom doesn't import cookies from your normal browser. Both Grok sign-in paths are experimental; two-account login/renewal and embedded SSO still need live verification.
 
+## Devin
+
+Devin has no self-serve usage API. In a signed-in app.devin.ai tab, open developer tools, select an `/api/` request, and copy its `Authorization` header value. Headroom accepts a bare token, `Bearer <token>`, or the whole header line. Enter your organization slug from the dashboard URL, an internal `org-…` ID, or the organization URL. The token is a session credential: keep it private, and reconnect when Headroom reports sign-in required.
+
 ## API keys and tokens
 
 Enter credentials in the native connection form. Keep them out of issue reports and agent chats. Billing reads can require an organization Admin or Management key instead of a normal inference key. A valid inference key can therefore still be rejected.
