@@ -65,8 +65,16 @@ private let devinAccount = Account(label: "", provider: .devin, options: ["organ
     await #expect(throws: MonitorError.unsupported("Devin organization not found. " + DevinClient.organizationHelp)) {
         try await DevinClient(http: devinHTTP("{}", status: 404)).fetch(devinAccount, secrets: .init(key: "fixture-token"))
     }
-    await #expect(throws: MonitorError.http(401)) {
+    await #expect(throws: MonitorError.unsupported(DevinClient.rejectedForSlug)) {
         try await DevinClient(http: devinHTTP("{}", status: 401)).fetch(devinAccount, secrets: .init(key: "fixture-token"))
+    }
+    let internalAccount = Account(label: "", provider: .devin, options: ["organization": "org-fixture"])
+    await #expect(throws: MonitorError.unsupported(DevinClient.rejectedToken)) {
+        try await DevinClient(http: devinHTTP("{}", status: 401)).fetch(internalAccount, secrets: .init(key: "fixture-token"))
+    }
+    await #expect(throws: MonitorError.unsupported(DevinClient.rejectedForSlug)) {
+        try await DevinClient(http: devinHTTP(#"{"detail": "No organizations found for auth1 user"}"#, status: 403))
+            .fetch(internalAccount, secrets: .init(key: "fixture-token"))
     }
 }
 

@@ -14,12 +14,25 @@ struct DevinClient: Sendable {
             request.setValue("application/json", forHTTPHeaderField: "Accept")
             request.setValue("en-US,en", forHTTPHeaderField: "Accept-Language")
             if let internalID = organization.internalID { request.setValue(internalID, forHTTPHeaderField: "x-cog-org-id") }
-            do { return try Self.snapshot(try await http.data(for: request), now: now) }
-            catch MonitorError.http(404) { lastError = .http(404); continue }
+            let data: Data, response: HTTPURLResponse
+            do { (data, response) = try await http.send(request) }
+            catch let error as MonitorError { throw error }
+            catch { throw MonitorError.network }
+            if response.statusCode == 404 { lastError = .http(404); continue }
+            if response.statusCode == 401 || response.statusCode == 403 {
+                // Some Devin sessions are accepted only with the internal organization ID header.
+                let detail = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["detail"] as? String
+                throw MonitorError.unsupported(organization.internalID == nil || detail == "No organizations found for auth1 user"
+                    ? Self.rejectedForSlug : Self.rejectedToken)
+            }
+            guard (200...299).contains(response.statusCode) else { throw MonitorError.http(response.statusCode) }
+            return try Self.snapshot(data, now: now)
         }
         throw lastError == .http(404) ? MonitorError.unsupported("Devin organization not found. " + Self.organizationHelp) : lastError
     }
 
+    static let rejectedForSlug = "Devin rejected this token. Enter the org-… ID from the request's x-cog-org-id header as the organization, or copy a fresh token."
+    static let rejectedToken = "Devin rejected this token. Copy a fresh Authorization header from a signed-in app.devin.ai request."
     static let organizationHelp = "Enter the name after app.devin.ai/org/ in your browser, or the org-… ID."
 
     // Accepts a bare token, "Bearer <token>", or a copied "Authorization: Bearer <token>" header line.
