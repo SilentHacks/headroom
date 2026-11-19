@@ -69,3 +69,12 @@ private let antigravityReport = """
     #expect(LoginPrompt.parse("\(redirected)\n", provider: .antigravity) == nil)
     #expect(LoginPrompt.parse(output, provider: .claude) == nil)
 }
+
+@Test func antigravitySignInRunsAgyInsidePrivatePseudoTerminal() throws {
+    guard FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/agy") || FileManager.default.isExecutableFile(atPath: "/usr/local/bin/agy") else { return }
+    let arguments = try AntigravityAuth.loginArguments()
+    #expect(AntigravityAuth.terminal.path == "/usr/bin/script")
+    #expect(Array(arguments.prefix(2)) == ["-q", "/dev/null"])
+    #expect(arguments[2].hasSuffix("/agy"))
+    #expect(Array(arguments.dropFirst(3)) == AntigravityAuth.usageArguments)
+}

@@ -65,6 +65,13 @@ enum AntigravityAuth {
     // Print mode signs in when needed, then reports quotas without running a model turn.
     static let usageArguments = ["-p", "/usage", "--output-format", "json"]
     static let callback = "https://antigravity.google/oauth-callback"
+    // agy offers interactive Google sign-in only with a controlling terminal, which a
+    // menu bar app lacks. script(1) gives sign-in a private pseudo-terminal.
+    static let terminal = URL(fileURLWithPath: "/usr/bin/script")
+
+    static func loginArguments() throws -> [String] {
+        ["-q", "/dev/null", try executable().path] + usageArguments
+    }
 
     static func executable() throws -> URL {
         let paths = ["/opt/homebrew/bin/agy", "/usr/local/bin/agy",
