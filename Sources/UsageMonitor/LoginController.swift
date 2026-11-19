@@ -22,7 +22,7 @@ final class LoginController {
         let helper = provider == .grok ? "grok" : provider == .codex ? "codex" : "claude"
         let paths = [FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/\(helper)").path,
                      "/opt/homebrew/bin/\(helper)", "/usr/local/bin/\(helper)"]
-        let executable = provider == .grok ? try GrokAuth.executable().path : provider == .antigravity ? try AntigravityAuth.executable().path : paths.first(where: { FileManager.default.isExecutableFile(atPath: $0) })
+        let executable = provider == .grok ? try GrokAuth.executable().path : provider == .antigravity ? AntigravityAuth.terminal.path : paths.first(where: { FileManager.default.isExecutableFile(atPath: $0) })
         guard let executable else {
             throw MonitorError.unsupported("Install \(provider.title)'s official CLI at ~/.local/bin/\(helper) or with Homebrew.")
         }
@@ -32,7 +32,7 @@ final class LoginController {
         let output = Pipe()
         let attempt = UUID()
         process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = provider == .grok ? ["login", "--oauth"] : provider == .antigravity ? AntigravityAuth.usageArguments : provider == .codex ? CodexAuth.loginArguments : ["auth", "login", "--claudeai"]
+        process.arguments = provider == .grok ? ["login", "--oauth"] : provider == .antigravity ? try AntigravityAuth.loginArguments() : provider == .codex ? CodexAuth.loginArguments : ["auth", "login", "--claudeai"]
         process.environment = try provider == .grok ? GrokAuth.environment(id, store: store) : provider == .antigravity ? AntigravityAuth.environment(id, store: store) : provider == .codex ? CodexAuth.environment(id, store: store) : store.helperEnvironment(id)
         process.currentDirectoryURL = store.profile(id)
         process.standardInput = input
